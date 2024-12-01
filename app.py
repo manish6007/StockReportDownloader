@@ -5,18 +5,28 @@ import time
 import os
 import shutil
 import re
+import tempfile
+from datetime import datetime
 from pathlib import Path
+import zipfile
+import io
+
+# Configure page
+st.set_page_config(
+    page_title="Company Analysis Tool",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+def get_temp_dir():
+    """Create and get temporary directory"""
+    if 'temp_dir' not in st.session_state:
+        st.session_state.temp_dir = tempfile.mkdtemp()
+    return st.session_state.temp_dir
 
 def validate_symbol(symbol):
-    """
-    Validate the input symbol
-    
-    Parameters:
-    symbol (str): Company symbol
-    
-    Returns:
-    str: Validated symbol
-    """
+    """Validate the input symbol"""
     if not symbol:
         raise ValueError("Company symbol cannot be empty")
         
@@ -27,44 +37,52 @@ def validate_symbol(symbol):
     return symbol
 
 def extract_file_paths(output):
-    """
-    Extract file paths from script output
-    
-    Parameters:
-    output (str): Script output text
-    
-    Returns:
-    list: List of file paths found in the output
-    """
-    # Pattern for PDF files
+    """Extract file paths from script output"""
     pdf_pattern = r'Generated report for.*?: (.*?\.pdf)'
-    # Pattern for CSV files
     csv_pattern = r'Data successfully saved to (.*?\.csv)'
     
     files = []
-    
-    # Find PDF files
     pdf_matches = re.findall(pdf_pattern, output)
     files.extend(pdf_matches)
-    
-    # Find CSV files
     csv_matches = re.findall(csv_pattern, output)
     files.extend(csv_matches)
     
     return files
 
-def execute_script(script_name, symbol):
-    """
-    Execute a Python script with the given symbol argument
-    
-    Parameters:
-    script_name (str): Name of the script to execute
-    symbol (str): Company symbol to pass as argument
-    
-    Returns:
-    bool, str: Success status and output message
-    """
+def cleanup_temp_files(temp_dir):
+    """Clean up temporary files"""
     try:
+        shutil.rmtree(temp_dir)
+        st.session_state.temp_dir = tempfile.mkdtemp()
+    except Exception as e:
+        st.error(f"Error cleaning up temporary files: {str(e)}")
+
+def create_zip_file(files, symbol):
+    """Create a zip file containing all reports"""
+    try:
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for file_path in files:
+                if os.path.exists(file_path):
+                    # Get just the filename for the zip
+                    file_name = os.path.basename(file_path)
+                    # Add file to zip
+                    zip_file.write(file_path, file_name)
+        return zip_buffer
+    except Exception as e:
+        st.error(f"Error creating zip file: {str(e)}")
+        return None
+
+@st.cache_data(show_spinner=False)
+def execute_script(script_name, symbol):
+    """Execute a Python script with caching"""
+    try:
+        # Set environment variables for scripts
+        temp_dir = get_temp_dir()
+        analysis_dir = os.path.join(temp_dir, symbol)
+        os.makedirs(analysis_dir, exist_ok=True)
+        os.environ['ANALYSIS_OUTPUT_DIR'] = analysis_dir
+        
         result = subprocess.run(
             [sys.executable, script_name, symbol],
             capture_output=True,
@@ -81,136 +99,128 @@ def execute_script(script_name, symbol):
         error_msg = f"Unexpected error executing {script_name}: {str(e)}"
         return False, error_msg
 
-def copy_files_to_target(files, symbol, target_dir):
-    """
-    Copy files to target directory in a stock-specific folder
-    
-    Parameters:
-    files (list): List of source file paths
-    symbol (str): Stock symbol
-    target_dir (str): Target directory path
-    
-    Returns:
-    list: List of copied file paths
-    """
-    # Create stock-specific folder in target directory
-    stock_folder = os.path.join(target_dir, symbol)
-    os.makedirs(stock_folder, exist_ok=True)
-    
-    copied_files = []
-    for src_path in files:
-        if os.path.exists(src_path):
-            # Get file name and create target path
-            file_name = os.path.basename(src_path)
-            dst_path = os.path.join(stock_folder, file_name)
-            
-            try:
-                shutil.copy2(src_path, dst_path)
-                copied_files.append(dst_path)
-            except Exception as e:
-                st.error(f"Error copying {file_name}: {str(e)}")
-                
-    return copied_files
-
 def main():
-    st.set_page_config(page_title="Company Analysis Tool", layout="wide")
-    
-    st.title("Company Analysis Tool")
+    st.title("📈 Company Analysis Tool")
     st.markdown("---")
+
+    # Sidebar configuration
+    with st.sidebar:
+        st.header("⚙️ Configuration")
+        debug_mode = st.checkbox("Enable Debug Mode", value=False)
+        
+        st.markdown("---")
+        st.markdown("### 📁 Storage Info")
+        st.info("Files are temporarily stored and will be deleted after download")
+
+    # Main content
+    col1, col2 = st.columns([2, 1])
     
-    # Target directory input
-    target_dir = st.text_input(
-        "Enter target directory path for reports:",
-        value=os.path.expanduser("~\\Documents\\StockReports"),
-        help="Reports will be organized in stock-specific folders within this directory"
-    )
-    
-    # Create a form for input
-    with st.form("analysis_form"):
-        symbol = st.text_input("Enter company symbol:")
-        submit_button = st.form_submit_button("Analyze")
-    
-    if submit_button:
+    with col1:
+        # Analysis Form
+        with st.form("analysis_form"):
+            symbol = st.text_input("Enter Company Symbol:", 
+                                 help="Example: AAPL, GOOGL, MSFT")
+            analyze_button = st.form_submit_button("🔍 Analyze")
+
+    if analyze_button:
         try:
-            # Validate symbol and target directory
+            # Validate symbol
             symbol = validate_symbol(symbol)
-            if not os.path.exists(target_dir):
-                try:
-                    os.makedirs(target_dir)
-                    st.success(f"Created target directory: {target_dir}")
-                except Exception as e:
-                    st.error(f"Error creating target directory: {str(e)}")
-                    return
             
-            # Create a progress bar
+            # Progress tracking
             progress_bar = st.progress(0)
-            status_text = st.empty()
+            status_container = st.empty()
             
-            # Define scripts to execute
+            # Execute analysis scripts
             scripts = [
                 'crawl_screener_generate_report_in_folder.py',
                 'download_candledata_in_folder.py'
             ]
             
-            # Execute each script
             success_count = 0
             outputs = []
             all_files = []
             
             for idx, script in enumerate(scripts):
-                status_text.text(f"Executing {script}...")
+                status_container.info(f"Running {script}...")
                 success, output = execute_script(script, symbol)
                 
                 if success:
                     success_count += 1
-                    st.success(f"Successfully executed {script}")
-                    # Extract file paths from output
+                    if debug_mode:
+                        st.success(f"✅ {script} completed successfully")
                     files = extract_file_paths(output)
                     all_files.extend(files)
                 else:
-                    st.error(f"Failed to execute {script}")
+                    st.error(f"❌ {script} failed")
+                    if debug_mode:
+                        st.code(output)
                 
                 outputs.append(output)
                 progress_bar.progress((idx + 1) / len(scripts))
-                time.sleep(1)
+                time.sleep(0.5)
             
-            # Final status
+            # Process and display results
             if success_count == len(scripts):
-                st.success(f"Successfully completed all analyses for {symbol}")
+                status_container.success(f"Analysis completed for {symbol}")
                 
                 if all_files:
-                    # Copy files to target location
-                    st.markdown("---")
-                    st.subheader("Copying Reports")
+                    st.markdown("### 📊 Generated Reports")
                     
-                    copied_files = copy_files_to_target(all_files, symbol, target_dir)
+                    # Create zip file of all reports
+                    zip_buffer = create_zip_file(all_files, symbol)
                     
-                    if copied_files:
-                        st.success(f"Successfully copied {len(copied_files)} files to:")
-                        st.code(os.path.join(target_dir, symbol))
+                    if zip_buffer:
+                        # Prepare zip file for download
+                        zip_buffer.seek(0)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        zip_filename = f"{symbol}_reports_{timestamp}.zip"
                         
-                        # Display copied files
-                        with st.expander("View Copied Files"):
-                            for file_path in copied_files:
-                                st.text(f"📄 {os.path.basename(file_path)}")
-                    else:
-                        st.error("Failed to copy any files to target location")
+                        # Download button for zip
+                        st.download_button(
+                            label="📥 Download All Reports (ZIP)",
+                            data=zip_buffer.getvalue(),
+                            file_name=zip_filename,
+                            mime="application/zip",
+                            on_click=cleanup_temp_files,
+                            args=(st.session_state.temp_dir,)
+                        )
+                        
+                        # Show files included in zip
+                        with st.expander("📋 Files included in ZIP"):
+                            for file_path in all_files:
+                                if os.path.exists(file_path):
+                                    st.text(f"📄 {os.path.basename(file_path)}")
                 else:
-                    st.warning("No reports were found in the script output")
-            else:
-                st.warning(f"Completed with some errors. {success_count} out of {len(scripts)} scripts succeeded for {symbol}")
+                    st.warning("No reports were generated")
             
-            # Display detailed output in expander
-            with st.expander("View Detailed Output"):
-                for script, output in zip(scripts, outputs):
-                    st.markdown(f"**Output from {script}:**")
-                    st.text(output)
-                
+            # Debug information
+            if debug_mode:
+                with st.expander("🔍 Debug Information"):
+                    st.markdown("### Script Outputs")
+                    for script, output in zip(scripts, outputs):
+                        st.markdown(f"**{script}:**")
+                        st.code(output)
+                        
         except ValueError as e:
-            st.error(f"Error: {str(e)}")
+            st.error(f"❌ {str(e)}")
         except Exception as e:
-            st.error(f"Unexpected error: {str(e)}")
-            st.exception(e)
+            st.error(f"❌ Unexpected error: {str(e)}")
+            if debug_mode:
+                st.exception(e)
+        finally:
+            progress_bar.empty()
+
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style='text-align: center'>
+            <p>Made with ❤️ by Your Company</p>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
 
 if __name__ == "__main__":
     main()
