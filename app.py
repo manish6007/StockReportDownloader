@@ -216,7 +216,7 @@ def main():
     st.markdown(
         """
         <div style='text-align: center'>
-            <p>Made with ❤️ by Your Company</p>
+            <p>Made with ❤️ by Manish</p>
         </div>
         """, 
         unsafe_allow_html=True
