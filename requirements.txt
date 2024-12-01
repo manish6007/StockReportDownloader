@@ -1,0 +1,23 @@
+# Web framework
+streamlit>=1.29.0
+
+# Core dependencies
+pandas>=1.5.0
+numpy>=1.21.0
+
+# System utilities
+python-dateutil>=2.8.2
+pytz>=2023.3
+
+# File handling
+pathlib>=1.0.1
+
+# Operating system interface
+platformdirs>=2.5.0
+
+# Basic utilities
+six>=1.16.0
+
+# Formatting and display
+packaging>=23.0
+altair>=4.0.0
