@@ -129,7 +129,7 @@ Common issues and solutions:
 
 ## Author
 
-[Your name/organization]
+Manish Shrivastava
 
 ## Acknowledgments
 
