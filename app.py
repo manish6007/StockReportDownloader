@@ -134,7 +134,8 @@ def main():
             # Execute analysis scripts
             scripts = [
                 'crawl_screener_generate_report_in_folder.py',
-                'download_candledata_in_folder.py'
+                'download_candledata_in_folder.py',
+                'download_daily_candle_data.py'  # Added new script
             ]
             
             success_count = 0
@@ -177,22 +178,32 @@ def main():
                         zip_filename = f"{symbol}_reports_{timestamp}.zip"
                         
                         # Download button for zip
-                        st.download_button(
-                            label="📥 Download All Reports (ZIP)",
-                            data=zip_buffer.getvalue(),
-                            file_name=zip_filename,
-                            mime="application/zip",
-                            on_click=cleanup_temp_files,
-                            args=(st.session_state.temp_dir,)
-                        )
+                        col1, col2 = st.columns([1, 2])
+                        with col1:
+                            st.download_button(
+                                label="📥 Download All Reports (ZIP)",
+                                data=zip_buffer.getvalue(),
+                                file_name=zip_filename,
+                                mime="application/zip",
+                                on_click=cleanup_temp_files,
+                                args=(st.session_state.temp_dir,)
+                            )
                         
                         # Show files included in zip
                         with st.expander("📋 Files included in ZIP"):
                             for file_path in all_files:
                                 if os.path.exists(file_path):
-                                    st.text(f"📄 {os.path.basename(file_path)}")
+                                    file_name = os.path.basename(file_path)
+                                    if file_name.endswith('.pdf'):
+                                        st.text(f"📑 PDF Report: {file_name}")
+                                    elif 'daily' in file_name.lower():
+                                        st.text(f"📊 Daily Candle Data: {file_name}")
+                                    else:
+                                        st.text(f"📈 Weekly Candle Data: {file_name}")
                 else:
                     st.warning("No reports were generated")
+            else:
+                st.warning(f"Completed with some errors. {success_count} out of {len(scripts)} scripts succeeded for {symbol}")
             
             # Debug information
             if debug_mode:
