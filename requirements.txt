@@ -21,3 +21,6 @@ six>=1.16.0
 # Formatting and display
 packaging>=23.0
 altair>=4.0.0
+
+yfinance
+bs4
