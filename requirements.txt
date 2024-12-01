@@ -24,3 +24,4 @@ altair>=4.0.0
 
 yfinance
 bs4
+reportlab
